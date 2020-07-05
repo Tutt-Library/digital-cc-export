@@ -9,6 +9,7 @@ import logging
 import os
 import requests
 import pathlib
+import string
 import sys
 import xml.etree.ElementTree as etree
 from rdflib import Namespace, RDF
@@ -30,6 +31,12 @@ etree.register_namespace("islandora", str(ISLANDORA))
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("Elasticsearch").setLevel(logging.ERROR)
+
+def format_filename(s):
+    valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+    filename = ''.join(c for c in s if c in valid_chars)
+    filename = filename.replace(' ','_') # I don't like spaces in filenames.
+    return filename
 
 class MODStoCSV(object):
 
@@ -148,7 +155,7 @@ class Exporter(object):
                     file_name = label
                 else:
                     file_name = dsid
-            file_name = file_name.replace(" ", "_").replace(".jpg", "")
+            file_name = format_filename(file_name).replace(".jpg", "")
             file_path = pid_directory/f"{file_name}{file_ext}"
             file_response = requests.get(ds_url)
             if file_response.status_code > 300:
