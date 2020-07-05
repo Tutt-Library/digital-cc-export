@@ -8,22 +8,62 @@ import datetime
 import logging
 import os
 import requests
+import pathlib
 import sys
 import xml.etree.ElementTree as etree
-from copy import deepcopy
 from rdflib import Namespace, RDF
+
+import config
 
 DC = Namespace("http://purl.org/dc/elements/1.1/")
 FEDORA_ACCESS = Namespace("http://www.fedora.info/definitions/1/0/access/")
 FEDORA = Namespace("info:fedora/fedora-system:def/relations-external#")
 FEDORA_MODEL = Namespace("info:fedora/fedora-system:def/model#")
 ISLANDORA = Namespace("http://islandora.ca/ontology/relsext#")
+
+NS = { "foxml": "info:fedora/fedora-system:def/foxml#",
+       "access": str(FEDORA_ACCESS),
+       "mods": "http://www.loc.gov/mods/v3" }
 etree.register_namespace("fedora", str(FEDORA))
 etree.register_namespace("fedora-model", str(FEDORA_MODEL))
 etree.register_namespace("islandora", str(ISLANDORA))
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("Elasticsearch").setLevel(logging.ERROR)
+
+class MODStoCSV(object):
+
+    def __init__(self, rest_url, pid):
+        # Extract MODS XML Datastream
+        mods_url = "{}{}/datastreams/MODS/content".format(
+            est_url,
+            pid)
+        mods_result = requests.get(
+            mods_url,
+            auth=self.auth)
+        mods_result.encoding = 'utf-8'
+        if mods_result.status_code > 399:
+            err_title = "Failed to index PID {}, error={} url={}".format(
+                pid,
+                mods_result.status_code,
+                mods_url)
+            logging.error(err_title)
+            # 404 error assume that MODS datastream doesn't exist for this
+            # pid, return False instead of raising IndexerError exception
+            if mods_result.status_code == 404:
+                return False
+            raise IndexerError(
+                err_title,
+                mods_result.text)
+        try:
+            if not isinstance(mods_result.text, str):
+                mods_xml = etree.XML(mods_result.text.decode())
+            else:
+                mods_xml = etree.XML(mods_result.text)
+        except etree.ParseError:
+            msg = "Could not parse pid {}".format(pid)
+
+
 
 
 class WebPageHandler(logging.Handler):
@@ -43,21 +83,30 @@ class WebPageHandler(logging.Handler):
 class Exporter(object):
     """Exports DC and MODS metadata from   Fedora Repository 3.8"""
 
-    def __init__(self, **kwargs):
-        """Initializes an instance of the IndexerClass
-
-		Keyword args:
-		  auth -- Tuple of username and password to authenticate to Fedora,
-			   defaults to Fedora's standard login credentials
-                  rest_url -- REST URL for Fedora 3.x, defaults to Fedora
-		  ri_url -- SPARQL Endpoint, defaults to Fedora's standard search URL
-
-	"""
-        self.auth = kwargs.get("auth")
+    def __init__(self):
+        """Initializes an instance of the IndexerClass"""
+        self.auth = config.FEDORA_AUTH
         self.logger = logging.getLogger(__file__)
-        self.rest_url = kwargs.get("rest_url")
-        self.ri_search = kwargs.get("ri_url")
+        self.rest_url = config.REST_URL
+        self.ri_search = config.RI_URL
+        self.current_directory = pathlib.Path(config.EXPORT_DIR)
+        self.dublin_core = []
+        self.mods = []
         
+    def __add_dc_row__(self, pid, dc_url):
+        click.echo(f"In DC row {pid} with url {dc_url}")
+
+    def __add_mods_row__(self, pid, mods_url):
+        click.echo(f"In MODS row {pid} with url {mods_url}")
+        mods_result = requests.get(mods_url)
+        if mods_result.status_code > 399:
+            return
+        mods_xml = etree.XML(mods_result.content)
+        title = mods_xml.find("mods:titleInfo/mods:title", namespaces=NS)
+        if title is None:
+            return
+        return title.text
+
 
     def __export_datastreams__(self, pid, title=None):
         """Internal method takes a PID, queries Fedora to extract 
@@ -75,25 +124,43 @@ class Exporter(object):
                 f"Failed to retrieve datastreams for {pid}",
                 f"Code {result.status_code} for url {ds_pid_url} \nError {result.text}")
         result_xml = etree.XML(result.text)
+        datastreams = result_xml.findall("access:datastream", namespaces=NS)
+        pid_directory = self.current_directory/pid.replace(":","_")
+        pid_directory.mkdir(parents=True, exist_ok=True)
         for row in datastreams:
-            file_name, file_ext = '', ''
-            mime_type = row.attrib.get('mimeType')
-            if mime_type.startswith("application/octet-stream"):
-                file_ext = 'bin'
-            else:
-                file_ext = mime_type.split("/")[-1]
-            # Download and save datastream
-            if title:
-                file_name = title
-            else:
-                file_name = row.attrib.get('label')
-            file_name = file_name.replace(" ", "_")
-            file_response = requests.get()
-            with open(f"{pid_directory}/{file_name}.{file_ext}", "wb+") as ds_file:
-                ds_file.write(file_response.data)
+            dsid = row.attrib.get("dsid")
+            label = row.attrib.get('label')
+            ds_url = f"{self.rest_url}{pid}/datastreams/{dsid}/content"
+            file_ext = self.__generate_ext__(row.attrib.get('mimeType'))
+            file_name = dsid
+            if dsid.startswith("DC"):
+                self.__add_dc_row__(pid, ds_url)
+                continue
+            if dsid.startswith("MODS"):
+                title = self.__add_mods_row__(pid, ds_url)
+                continue
+            if dsid.startswith("TN"):
+                file_name = "thumbnail"
+            if dsid.startswith("OBJ"):
+                if title:
+                    file_name = title
+                elif len(label) > 0:
+                    file_name = label
+                else:
+                    file_name = dsid
+            file_name = file_name.replace(" ", "_").replace(".jpg", "")
+            file_path = pid_directory/f"{file_name}{file_ext}"
+            file_response = requests.get(ds_url)
+            if file_response.status_code > 300:
+                continue
+            file_path.write_bytes(file_response.content)
 
+    def __generate_ext__(self, mime_type):
+        last_ = mime_type.split("/")[-1]
+        return f".{last_.split('+')[-1]}"
 
-    def __index_compound__(self, pid):
+ 
+    def __export_compound__(self, pid):
         """Internal method takes a parent PID and exports  all children.
         Args:
             pid -- PID of parent Fedora object
@@ -166,7 +233,7 @@ WHERE {{
                     rels_ext_result.text))
         return etree.XML(rels_ext_result.text)
 
-    def export_pid(self, pid, parent=None, inCollections=[]):
+    def export_pid(self, pid, parent=None):
         """Method retrieves MODS and any PDF datastreams and indexes
         into repository's Elasticsearch instance
 
@@ -188,47 +255,15 @@ WHERE {{
 	# object
         if is_constituent is not None:
             return False
-        # Extract MODS XML Datastream
-        mods_url = "{}{}/datastreams/MODS/content".format(
-            self.rest_url,
-            pid)
-        mods_result = requests.get(
-            mods_url,
-            auth=self.auth)
-        mods_result.encoding = 'utf-8'
-        if mods_result.status_code > 399:
-            err_title = "Failed to index PID {}, error={} url={}".format(
-                pid,
-                mods_result.status_code,
-                mods_url)
-            logging.error(err_title)
-            # 404 error assume that MODS datastream doesn't exist for this
-            # pid, return False instead of raising IndexerError exception
-            if mods_result.status_code == 404:
-                return False
-            raise IndexerError(
-                err_title,
-                mods_result.text)
-        try:
-            if not isinstance(mods_result.text, str):
-                mods_xml = etree.XML(mods_result.text.decode())
-            else:
-                mods_xml = etree.XML(mods_result.text)
-        except etree.ParseError:
-            msg = "Could not parse pid {}".format(pid)
-            return False
-        mods_body = mods2rdf(mods_xml)
-        # Extract and process based on content model
-        return False
+        click.echo(f"{pid} ", nl=False)
+        self.__export_datastreams__(pid)
 
-    def index_collection(self, pid, parents=[]):
+    def export_collection(self, pid):
         """Method takes a parent collection PID, retrieves all children, and
-        iterates through and indexes all pids
+        iterates through and export all pids
 
         Args:
             pid -- Collection PID
-            parents -- List of all Fedora Object PIDs that pid is in the 
-	               collection
 
         """
         sparql = """SELECT DISTINCT ?s
@@ -236,11 +271,11 @@ WHERE {{
   ?s <fedora-rels-ext:isMemberOfCollection> <info:fedora/{}> .
 }}""".format(pid)
         started = datetime.datetime.utcnow()
-        msg = "Started indexing collection {} at {}".format(
+        msg = "Started exporting collection {} at {}".format(
             pid,
             started.isoformat())
-        self.logger.info(msg)
-        self.messages.append(msg)
+        click.echo(msg)
+
         children_response = requests.post(
             self.ri_search,
             data={"type": "tuples",
@@ -248,14 +283,13 @@ WHERE {{
                   "format": "json",
                   "query": sparql},
             auth=self.auth)
+        self.current_directory = self.current_directory/pid.replace(":", "_")
         if children_response.status_code < 400:
             children = children_response.json().get('results')
             for row in children:
                 iri = row.get('s')
                 child_pid = iri.split("/")[-1]
-                child_parents = deepcopy(parents)
-                child_parents.append(pid)
-                self.index_pid(child_pid, pid, child_parents)
+                self.export_pid(child_pid, pid)
                 is_collection_sparql = """SELECT DISTINCT ?o
 WHERE {{        
   <info:fedora/{0}> <fedora-model:hasModel> <info:fedora/islandora:collectionCModel> .
@@ -269,13 +303,13 @@ WHERE {{
                           "query": is_collection_sparql},
                     auth=self.auth)
                 if len(is_collection_result.json().get('results')) > 0:
-                    self.index_collection(child_pid, child_parents)
+                    self.export_collection(child_pid)
         else:
             err_title = "Failed to index collection PID {}, error {}".format(
                 pid,
                 children_response.status_code)
             logging.error(err_title)
-            raise IndexerError(
+            raise ExporterError(
                 err_title,
                 children_response.text)
         end = datetime.datetime.utcnow()
@@ -285,15 +319,7 @@ WHERE {{
             len(children),
             (end-started).seconds / 60.0)
         self.logger.info(msg)
-        self.messages.append(msg)
         click.echo(msg)
-
-    def reset(self):
-        """Deletes existing repository index and reloads Map"""
-        if self.elastic.indices.exists('repository'):
-            self.elastic.indices.delete(index='repository')
-            # Load mapping
-            self.elastic.indices.create(index='repository', body=MAP)
 
 
 class ExporterError(Exception):
@@ -314,3 +340,19 @@ class ExporterError(Exception):
         """Returns string representation of the object using the instance's
 		title"""
         return repr(self.title)
+
+@click.command()
+@click.option("--auth", help="Tuple of username and password")
+@click.option("--ri_url", help="SPARQL endpoint")
+@click.option("--rest_url", help="Fedora REST API")
+def run(auth, ri_url, rest_url):
+    start = datetime.datetime.utcnow()
+    click.echo(f"Digital CC Fedora 3.8 Exporter\nStarted at {start}")
+    exporter = Exporter()
+    # exporter.export_collection(config.INITIAL_PID)
+    exporter.export_collection("coccc:10504")
+    # exporter.export_pid('coccc:11057')
+
+
+if __name__ == "__main__":
+    run()
