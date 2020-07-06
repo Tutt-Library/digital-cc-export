@@ -183,6 +183,7 @@ class Exporter(object):
         datastreams = result_xml.findall("access:datastream", namespaces=NS)
         pid_directory = current_directory/pid.replace(":","_")
         pid_directory.mkdir(parents=True, exist_ok=True)
+        title = None
         for row in datastreams:
             dsid = row.attrib.get("dsid")
             label = row.attrib.get('label')
@@ -204,7 +205,7 @@ class Exporter(object):
                     file_name = label
                 else:
                     file_name = dsid
-            file_name = format_filename(file_name).replace(".jpg", "")
+            file_name = format_filename(file_name).replace(".jpg", "").replace(".mp3", "")
             file_path = pid_directory/f"{file_name}{file_ext}"
             file_response = requests.get(ds_url)
             if file_response.status_code > 300:
