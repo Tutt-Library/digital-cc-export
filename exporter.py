@@ -4,6 +4,7 @@
 __author__ = "Jeremy Nelson"
 
 import click
+import csv
 import datetime
 import logging
 import os
@@ -11,7 +12,7 @@ import requests
 import pathlib
 import string
 import sys
-import xml.etree.ElementTree as etree
+import lxml.etree as etree
 from rdflib import Namespace, RDF
 
 import config
@@ -97,25 +98,73 @@ class Exporter(object):
         self.rest_url = config.REST_URL
         self.ri_search = config.RI_URL
         self.current_directory = pathlib.Path(config.EXPORT_DIR)
-        self.dublin_core = []
-        self.mods = []
+        self.dublin_core, self.dc_fields = [], ['pid']
+        self.mods, self.mods_fields = [], ['pid']
         
     def __add_dc_row__(self, pid, dc_url):
-        click.echo(f"In DC row {pid} with url {dc_url}")
+        dc_result = requests.get(dc_url)
+        if dc_result.status_code > 399:
+            return
+        dc_result.encoding = 'utf-8'
+        dc_xml = etree.XML(dc_result.content)
+        dc_dict = { "pid": pid }
+        for child in dc_xml.iter():
+            if child.text is None:
+                continue
+            column = f"{child.tag}".replace(r"{http://purl.org/dc/elements/1.1/}", "dc:")
+            if column in dc_dict:
+                try:
+                    counter = int(column[-1])
+                    column = f"{column[:-1]}{counter + 1}"
+                except ValueError:
+                    column = f"{column}1"
+            dc_dict[column] = child.text
+            self.dc_fields.append(column)
+        self.dublin_core.append(dc_dict)
 
     def __add_mods_row__(self, pid, mods_url):
-        click.echo(f"In MODS row {pid} with url {mods_url}")
         mods_result = requests.get(mods_url)
         if mods_result.status_code > 399:
             return
-        mods_xml = etree.XML(mods_result.content)
+        mods_result.encoding = 'utf-8'
+        try:
+            mods_xml = etree.XML(mods_result.content)
+        except etree.XMLSyntaxError:
+            click.echo(f"{pid} MODS {mods_url} XML Syntax Error")
+            return
+        mods_dict = {}
+        for child in mods_xml.iter():
+            if child.text is None or len(child.text.strip()) < 1:
+                continue
+            column = ''
+            ancestors = [ancestor for ancestor in child.iterancestors()]
+            ancestors.reverse()
+            for ancestor in ancestors:
+                column += f"{ancestor.tag}".replace(r"{http://www.loc.gov/mods/v3}", "mods:")
+                if 'type' in ancestor.attrib:
+                    column += f"[type={ancestor.attrib.get('type')}]"
+                column += " > " 
+            column += f"{child.tag}".replace(r"{http://www.loc.gov/mods/v3}", "mods:")
+            if 'type' in child.attrib:
+                column += f"[type={child.attrib.get('type')}]"
+            if column in mods_dict:
+                # Extracts last character, if int, increment column by 1
+                try:
+                    current = int(column[-1])
+                    column = f"{column[:-1]}{current + 1}"
+                except ValueError:
+                    column = f"{column}1"
+            mods_dict[column] = child.text
+            self.mods_fields.append(column)
+        mods_dict['pid'] = pid
+        self.mods.append(mods_dict)
         title = mods_xml.find("mods:titleInfo/mods:title", namespaces=NS)
         if title is None:
             return
         return title.text
 
 
-    def __export_datastreams__(self, pid, title=None):
+    def __export_datastreams__(self, pid, current_directory):
         """Internal method takes a PID, queries Fedora to extract 
         datastreams, renames object if title exists, and sets the 
         objects to the 
@@ -130,9 +179,9 @@ class Exporter(object):
             raise ExporterError(
                 f"Failed to retrieve datastreams for {pid}",
                 f"Code {result.status_code} for url {ds_pid_url} \nError {result.text}")
-        result_xml = etree.XML(result.text)
+        result_xml = etree.XML(result.content)
         datastreams = result_xml.findall("access:datastream", namespaces=NS)
-        pid_directory = self.current_directory/pid.replace(":","_")
+        pid_directory = current_directory/pid.replace(":","_")
         pid_directory.mkdir(parents=True, exist_ok=True)
         for row in datastreams:
             dsid = row.attrib.get("dsid")
@@ -161,10 +210,6 @@ class Exporter(object):
             if file_response.status_code > 300:
                 continue
             file_path.write_bytes(file_response.content)
-
-    def __generate_ext__(self, mime_type):
-        last_ = mime_type.split("/")[-1]
-        return f".{last_.split('+')[-1]}"
 
  
     def __export_compound__(self, pid):
@@ -198,6 +243,30 @@ WHERE {{
             if pid_as_ds is not None:
                 output.extend(pid_as_ds)
         return output
+
+    def __generate_ext__(self, mime_type):
+        last_ = mime_type.split("/")[-1]
+        return f".{last_.split('+')[-1]}"
+
+    def __generate_metadata__(self, path):
+        mods_path = path/"mods.csv"
+        mods_fields = list(set(self.mods_fields))
+        with mods_path.open("w", encoding='utf-8', newline='') as fo:
+            mods_writer = csv.DictWriter(fo, fieldnames=mods_fields)
+            mods_writer.writeheader()
+            for row in self.mods:
+                mods_writer.writerow(row)
+            #mods_writer.writeheader()
+        dc_path = path/"dublin_core.csv"
+        dc_fields = list(set(self.dc_fields))
+        with dc_path.open("w", encoding='utf-8', newline='') as fo:
+            dc_writer = csv.DictWriter(fo, fieldnames=dc_fields)
+            dc_writer.writeheader()
+            for row in self.dublin_core:
+                dc_writer.writerow(row)
+        self.mods, self.mods_fields = [], ['pid']
+        self.dublin_core, self.dc_fields = [], ['pid']
+
 
     def __process_constituent__(self, pid, rels_ext=None):
         """Export constituent PID and returns dictionary compatible with datastream
@@ -238,18 +307,15 @@ WHERE {{
                     rels_ext_url,
                     rels_ext_result.status_code,
                     rels_ext_result.text))
-        return etree.XML(rels_ext_result.text)
+        return etree.XML(rels_ext_result.content)
 
-    def export_pid(self, pid, parent=None):
+    def export_pid(self, pid, parent_path):
         """Method retrieves MODS and any PDF datastreams and indexes
         into repository's Elasticsearch instance
 
         Args:
             pid: PID to index
-            parent: PID of parent collection, default is None
-            inCollections: List of pids that this object belongs int, used for
-			    aggregations.
-
+            parent_path: path of parent            
         Returns:
             boolean: True if indexed, False otherwise
         """
@@ -263,14 +329,15 @@ WHERE {{
         if is_constituent is not None:
             return False
         click.echo(f"{pid} ", nl=False)
-        self.__export_datastreams__(pid)
+        self.__export_datastreams__(pid, parent_path)
 
-    def export_collection(self, pid):
+    def export_collection(self, pid, parent_path):
         """Method takes a parent collection PID, retrieves all children, and
         iterates through and export all pids
 
         Args:
             pid -- Collection PID
+            parent_path -- Path of parent
 
         """
         sparql = """SELECT DISTINCT ?s
@@ -290,13 +357,13 @@ WHERE {{
                   "format": "json",
                   "query": sparql},
             auth=self.auth)
-        self.current_directory = self.current_directory/pid.replace(":", "_")
+        current_directory = parent_path/pid.replace(":", "_")
         if children_response.status_code < 400:
             children = children_response.json().get('results')
             for row in children:
                 iri = row.get('s')
                 child_pid = iri.split("/")[-1]
-                self.export_pid(child_pid, pid)
+                self.export_pid(child_pid, current_directory)
                 is_collection_sparql = """SELECT DISTINCT ?o
 WHERE {{        
   <info:fedora/{0}> <fedora-model:hasModel> <info:fedora/islandora:collectionCModel> .
@@ -310,7 +377,7 @@ WHERE {{
                           "query": is_collection_sparql},
                     auth=self.auth)
                 if len(is_collection_result.json().get('results')) > 0:
-                    self.export_collection(child_pid)
+                    self.export_collection(child_pid, current_directory)
         else:
             err_title = "Failed to index collection PID {}, error {}".format(
                 pid,
@@ -319,8 +386,9 @@ WHERE {{
             raise ExporterError(
                 err_title,
                 children_response.text)
+        self.__generate_metadata__(current_directory)
         end = datetime.datetime.utcnow()
-        msg = "Indexing done {} at {}, total object {} total time {}".format(
+        msg = "\nIndexing done {} at {}, total object {} total time {}".format(
             pid,
             end.isoformat(),
             len(children),
@@ -356,10 +424,11 @@ def run(auth, ri_url, rest_url):
     start = datetime.datetime.utcnow()
     click.echo(f"Digital CC Fedora 3.8 Exporter\nStarted at {start}")
     exporter = Exporter()
-    # exporter.export_collection(config.INITIAL_PID)
-    exporter.export_collection("coccc:10504")
-    # exporter.export_pid('coccc:11057')
-
+    exporter.export_collection(config.INITIAL_PID, pathlib.Path(config.EXPORT_DIR))
+    #exporter.export_collection("coccc:10504", pathlib.Path(config.EXPORT_DIR))
+    #exporter.export_pid('coccc:11057')
+    end = datetime.datetime.utcnow()
+    click.echo(f"Finished at {end} total time {(end-start).seconds / 60.} minutes")
 
 if __name__ == "__main__":
     run()
