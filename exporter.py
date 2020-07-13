@@ -328,9 +328,18 @@ WHERE {{
         # Skip and don't index if pid is a constituent of another compound 
 	# object
         if is_constituent is not None:
+            click.echo(f"{pid} constituent of {is_constituent}")
             return False
         click.echo(f"{pid} ", nl=False)
-        self.__export_datastreams__(pid, parent_path)
+
+        # Checks if pid has a compound model
+        cmp_xpath = "rdf:Description/fedora-model:hasModel[rdf:resource = 'info:fedora/islandora:compoundCModel']"
+        is_compound = rels_ex.find(cmp_xpath, namespaces={ "rdf": str(RDF),
+                                                           "fedora-model": str(FEDORA_MODEL))
+        if is_compound is not None:
+            self.__export_compound__(pid, parent_path)
+        else:
+            self.__export_datastreams__(pid, parent_path)
 
     def export_collection(self, pid, parent_path):
         """Method takes a parent collection PID, retrieves all children, and
@@ -418,14 +427,17 @@ class ExporterError(Exception):
         return repr(self.title)
 
 @click.command()
-@click.option("--auth", help="Tuple of username and password")
-@click.option("--ri_url", help="SPARQL endpoint")
-@click.option("--rest_url", help="Fedora REST API")
-def run(auth, ri_url, rest_url):
+@click.option("--collection", help="Pid of collection")
+@click.option("--export", help="Export directory")
+def run(collection, export):
     start = datetime.datetime.utcnow()
     click.echo(f"Digital CC Fedora 3.8 Exporter\nStarted at {start}")
     exporter = Exporter()
-    exporter.export_collection(config.INITIAL_PID, pathlib.Path(config.EXPORT_DIR))
+    if collection == None:
+        collection = config.INITIAL_PID
+    if export == None:
+        export = config.EXPORT_DIR
+    exporter.export_collection(collection, pathlib.Path(export))
     #exporter.export_collection("coccc:10504", pathlib.Path(config.EXPORT_DIR))
     #exporter.export_pid('coccc:11057')
     end = datetime.datetime.utcnow()
