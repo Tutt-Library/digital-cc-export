@@ -39,6 +39,20 @@ def format_filename(s):
     filename = filename.replace(' ','_') # I don't like spaces in filenames.
     return filename
 
+def collection_objects(pid):
+    sparql = """SELECT DISTINCT ?s
+WHERE {{
+  ?s <fedora-rels-ext:isMemberOfCollection> <info:fedora/{}> .
+}}""".format(pid)
+    children_response = requests.post(
+        config.RI_URL,
+        data={"type": "tuples",
+              "lang": "sparql",
+              "format": "json",
+               "query": sparql},
+        auth=config.FEDORA_AUTH)
+    click.echo(children_response.json())
+
 class MODStoCSV(object):
 
     def __init__(self, rest_url, pid):
@@ -207,14 +221,16 @@ class Exporter(object):
                     file_name = dsid
             file_name = format_filename(file_name).replace(".jpg", "").replace(".mp3", "")
             file_path = pid_directory/f"{file_name}{file_ext}"
-            file_response = requests.get(ds_url)
+            file_response = requests.get(ds_url, stream=True)
             if file_response.status_code > 300:
                 continue
-            file_path.write_bytes(file_response.content)
+            for chunk in file_response.iter_content(chunk_size=1024):
+                if chunk:
+                     file_path.write_bytes(chunk)
 
  
-    def __export_compound__(self, pid):
-        """Internal method takes a parent PID and exports  all children.
+    def __export_compound__(self, pid, parent_path):
+        """Internal method takes a parent PID and exports all children.
         Args:
             pid -- PID of parent Fedora object
         """
@@ -237,10 +253,10 @@ WHERE {{
                     result.status_code,
                     pid,
                     result.text))
+        current_path = parent_path/pid.replace(":", "_")
         for row in result.json().get('results'):
             constituent_pid = row.get('s').split("/")[-1]
-            self.skip_pids.append(constituent_pid)
-            pid_as_ds = self.__process_constituent__(constituent_pid)
+            pid_as_ds = self.__process_constituent__(constituent_pid, current_path)
             if pid_as_ds is not None:
                 output.extend(pid_as_ds)
         return output
@@ -269,28 +285,15 @@ WHERE {{
         self.dublin_core, self.dc_fields = [], ['pid']
 
 
-    def __process_constituent__(self, pid, rels_ext=None):
+    def __process_constituent__(self, pid, parent_path):
         """Export constituent PID and returns dictionary compatible with datastream
 
 		Args:
 		    pid -- PID
         """
-        if not rels_ext:
-            rels_ext = self.__get_rels_ext__(pid)
-        xpath = "{{{0}}}Description/{{{1}}}isConstituentOf".format(
-            RDF,
-            FEDORA)
-        isConstituentOf = rels_ext.find(xpath)
-        parent_pid = isConstituentOf.attrib.get(
-            "{{{0}}}resource".format(RDF)).split("/")[-1]
-        xpath = "{{{0}}}Description/{{{1}}}isSequenceNumberOf{2}".format(
-            RDF,
-            ISLANDORA,
-			parent_pid.replace(":","_"))
-        self.__export_datastreams__(pid)
-        return datastreams
+        self.__export_datastreams__(pid, parent_path)
        
-        
+
     def __get_rels_ext__(self, pid):
         """Extracts and returns RELS-EXT base on PID
 
@@ -328,18 +331,18 @@ WHERE {{
         # Skip and don't index if pid is a constituent of another compound 
 	# object
         if is_constituent is not None:
-            click.echo(f"{pid} constituent of {is_constituent}")
             return False
         click.echo(f"{pid} ", nl=False)
 
         # Checks if pid has a compound model
-        cmp_xpath = "rdf:Description/fedora-model:hasModel[rdf:resource = 'info:fedora/islandora:compoundCModel']"
-        is_compound = rels_ex.find(cmp_xpath, namespaces={ "rdf": str(RDF),
-                                                           "fedora-model": str(FEDORA_MODEL))
-        if is_compound is not None:
-            self.__export_compound__(pid, parent_path)
-        else:
-            self.__export_datastreams__(pid, parent_path)
+        cmp_xpath = "rdf:Description/fedora-model:hasModel"
+        models = rels_ext.findall(cmp_xpath, namespaces={ "rdf": str(RDF),
+                                                          "fedora-model": str(FEDORA_MODEL)})
+        for model in models:
+            if model.attrib["{{{0}}}resource".format(RDF)] == 'info:fedora/islandora:compoundCModel':
+                self.__export_compound__(pid, parent_path)
+                return
+        self.__export_datastreams__(pid, parent_path)
 
     def export_collection(self, pid, parent_path):
         """Method takes a parent collection PID, retrieves all children, and
@@ -389,7 +392,7 @@ WHERE {{
                 if len(is_collection_result.json().get('results')) > 0:
                     self.export_collection(child_pid, current_directory)
         else:
-            err_title = "Failed to index collection PID {}, error {}".format(
+            err_title = "Failed to export collection PID {}, error {}".format(
                 pid,
                 children_response.status_code)
             logging.error(err_title)
@@ -398,7 +401,7 @@ WHERE {{
                 children_response.text)
         self.__generate_metadata__(current_directory)
         end = datetime.datetime.utcnow()
-        msg = "\nIndexing done {} at {}, total object {} total time {}".format(
+        msg = "\nExport done {} at {}, total object {} total time {}".format(
             pid,
             end.isoformat(),
             len(children),
@@ -439,7 +442,8 @@ def run(collection, export):
         export = config.EXPORT_DIR
     exporter.export_collection(collection, pathlib.Path(export))
     #exporter.export_collection("coccc:10504", pathlib.Path(config.EXPORT_DIR))
-    #exporter.export_pid('coccc:11057')
+    #exporter.export_pid('coccc:10463', pathlib.Path("E:\export"))
+    #collection_objects(config.INITIAL_PID)
     end = datetime.datetime.utcnow()
     click.echo(f"Finished at {end} total time {(end-start).seconds / 60.} minutes")
 
