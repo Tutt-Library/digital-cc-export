@@ -25,7 +25,9 @@ ISLANDORA = Namespace("http://islandora.ca/ontology/relsext#")
 
 NS = { "foxml": "info:fedora/fedora-system:def/foxml#",
        "access": str(FEDORA_ACCESS),
-       "mods": "http://www.loc.gov/mods/v3" }
+       "mods": "http://www.loc.gov/mods/v3",
+       "obj": "http://www.fedora.info/definitions/1/0/access/"}
+
 etree.register_namespace("fedora", str(FEDORA))
 etree.register_namespace("fedora-model", str(FEDORA_MODEL))
 etree.register_namespace("islandora", str(ISLANDORA))
@@ -38,6 +40,17 @@ def format_filename(s):
     filename = ''.join(c for c in s if c in valid_chars)
     filename = filename.replace(' ','_') # I don't like spaces in filenames.
     return filename
+
+
+def get_filename(pid):
+    object_url = f"{config.REST_URL}{pid}?format=xml"
+    object_result = requests.get(object_url)
+    object_xml = etree.XML(object_result.text.encode())
+    label = object_xml.find("obj:objLabel", namespaces=NS)
+    if label is not None:
+        return format_filename(label.text)
+    else:
+        return pid.replace(":", "_")
 
 def collection_objects(pid):
     sparql = """SELECT DISTINCT ?s
@@ -112,10 +125,10 @@ class Exporter(object):
         self.rest_url = config.REST_URL
         self.ri_search = config.RI_URL
         self.current_directory = pathlib.Path(config.EXPORT_DIR)
-        self.dublin_core, self.dc_fields = [], ['pid']
-        self.mods, self.mods_fields = [], ['pid']
-        
-    def __add_dc_row__(self, pid, dc_url):
+        self.dublin_core = {}
+        self.mods = {}
+
+    def __add_dc_row__(self, pid, collection_pid, dc_url):
         dc_result = requests.get(dc_url)
         if dc_result.status_code > 399:
             return
@@ -133,10 +146,10 @@ class Exporter(object):
                 except ValueError:
                     column = f"{column}1"
             dc_dict[column] = child.text
-            self.dc_fields.append(column)
-        self.dublin_core.append(dc_dict)
+            self.dublin_core[collection_pid]['fields'].append(column)
+        self.dublin_core[collection_pid]['rows'].append(dc_dict)
 
-    def __add_mods_row__(self, pid, mods_url):
+    def __add_mods_row__(self, pid, collection_pid, mods_url):
         mods_result = requests.get(mods_url)
         if mods_result.status_code > 399:
             return
@@ -169,16 +182,16 @@ class Exporter(object):
                 except ValueError:
                     column = f"{column}1"
             mods_dict[column] = child.text
-            self.mods_fields.append(column)
+            self.mods[collection_pid]['fields'].append(column)
         mods_dict['pid'] = pid
-        self.mods.append(mods_dict)
+        self.mods[collection_pid]['rows'].append(mods_dict)
         title = mods_xml.find("mods:titleInfo/mods:title", namespaces=NS)
         if title is None:
             return
         return title.text
 
 
-    def __export_datastreams__(self, pid, current_directory):
+    def __export_datastreams__(self, pid, current_directory, is_collection=False):
         """Internal method takes a PID, queries Fedora to extract 
         datastreams, renames object if title exists, and sets the 
         objects to the 
@@ -195,20 +208,19 @@ class Exporter(object):
                 f"Code {result.status_code} for url {ds_pid_url} \nError {result.text}")
         result_xml = etree.XML(result.content)
         datastreams = result_xml.findall("access:datastream", namespaces=NS)
-        pid_directory = current_directory/pid.replace(":","_")
+        if is_collection:
+            pid_directory = current_directory
+        else:
+            pid_directory = current_directory/pid.replace(":","_")
         pid_directory.mkdir(parents=True, exist_ok=True)
-        title = None
+        title = get_filename(pid)
         for row in datastreams:
             dsid = row.attrib.get("dsid")
             label = row.attrib.get('label')
             ds_url = f"{self.rest_url}{pid}/datastreams/{dsid}/content"
             file_ext = self.__generate_ext__(row.attrib.get('mimeType'))
             file_name = dsid
-            if dsid.startswith("DC"):
-                self.__add_dc_row__(pid, ds_url)
-                continue
-            if dsid.startswith("MODS"):
-                title = self.__add_mods_row__(pid, ds_url)
+            if dsid.startswith("DC") or dsid.startswith("MODS"):
                 continue
             if dsid.startswith("TN"):
                 file_name = "thumbnail"
@@ -265,25 +277,35 @@ WHERE {{
         last_ = mime_type.split("/")[-1]
         return f".{last_.split('+')[-1]}"
 
-    def __generate_metadata__(self, path):
-        mods_path = path/"mods.csv"
-        mods_fields = list(set(self.mods_fields))
-        with mods_path.open("w", encoding='utf-8', newline='') as fo:
-            mods_writer = csv.DictWriter(fo, fieldnames=mods_fields)
-            mods_writer.writeheader()
-            for row in self.mods:
-                mods_writer.writerow(row)
-            #mods_writer.writeheader()
-        dc_path = path/"dublin_core.csv"
-        dc_fields = list(set(self.dc_fields))
-        with dc_path.open("w", encoding='utf-8', newline='') as fo:
-            dc_writer = csv.DictWriter(fo, fieldnames=dc_fields)
-            dc_writer.writeheader()
-            for row in self.dublin_core:
-                dc_writer.writerow(row)
-        self.mods, self.mods_fields = [], ['pid']
-        self.dublin_core, self.dc_fields = [], ['pid']
+    def __generate_csv__(self, path, collection_pid):
+        if path.name.startswith("mods"):
+            metadata = self.mods[collection_pid]['rows']
+            fieldnames = list(set(self.mods[collection_pid]['fields']))
+        elif path.name.startswith("dublin_core"):
+            metadata = self.dublin_core[collection_pid]['rows']
+            fieldnames = list(set(self.dublin_core[collection_pid]['fields']))
+        else:
+            return
+        with path.open("w", encoding='utf-8', newline='') as fo:
+            csv_writer = csv.DictWriter(fo, fieldnames=fieldnames)
+            csv_writer.writeheader()
 
+            for row in metadata:
+                csv_writer.writerow(row)
+
+
+    def __generate_metadata__(self, path, collection_pid):
+        if len(self.mods) > 0:
+            self.__generate_csv__(path/"mods.csv", collection_pid)
+        if len(self.dublin_core) > 0:
+            self.__generate_csv__(path/"dublin_core.csv", collection_pid)
+
+    def __get_child_metadata__(self, child_pid, collection_pid):
+        dc_url = f"{self.rest_url}{child_pid}/datastreams/DC/content"
+        mods_url = f"{self.rest_url}{child_pid}/datastreams/MODS/content"
+        self.__add_dc_row__(child_pid, collection_pid, dc_url)
+        self.__add_mods_row__(child_pid, collection_pid, mods_url)
+        
 
     def __process_constituent__(self, pid, parent_path):
         """Export constituent PID and returns dictionary compatible with datastream
@@ -362,7 +384,10 @@ WHERE {{
             pid,
             started.isoformat())
         click.echo(msg)
-
+        self.mods[pid] = { "fields": ['pid'],
+                           "rows": [] }
+        self.dublin_core[pid] = { "fields": ['pid'],
+                                  "rows": [] }
         children_response = requests.post(
             self.ri_search,
             data={"type": "tuples",
@@ -370,13 +395,15 @@ WHERE {{
                   "format": "json",
                   "query": sparql},
             auth=self.auth)
-        current_directory = parent_path/pid.replace(":", "_")
+        collection_path = get_filename(pid)        
+        current_directory = parent_path/collection_path
+        # Export any collection datastreams
+        self.__export_datastreams__(pid, current_directory, True)
         if children_response.status_code < 400:
             children = children_response.json().get('results')
             for row in children:
                 iri = row.get('s')
                 child_pid = iri.split("/")[-1]
-                self.export_pid(child_pid, current_directory)
                 is_collection_sparql = """SELECT DISTINCT ?o
 WHERE {{        
   <info:fedora/{0}> <fedora-model:hasModel> <info:fedora/islandora:collectionCModel> .
@@ -389,8 +416,11 @@ WHERE {{
                           "format": "json",
                           "query": is_collection_sparql},
                     auth=self.auth)
+                self.__get_child_metadata__(child_pid, pid)
                 if len(is_collection_result.json().get('results')) > 0:
                     self.export_collection(child_pid, current_directory)
+                else:
+                    self.export_pid(child_pid, current_directory)
         else:
             err_title = "Failed to export collection PID {}, error {}".format(
                 pid,
@@ -399,7 +429,10 @@ WHERE {{
             raise ExporterError(
                 err_title,
                 children_response.text)
-        self.__generate_metadata__(current_directory)
+        self.__generate_metadata__(current_directory, pid)
+        # Clear collection pid 
+        self.dublin_core.pop(pid)
+        self.mods.pop(pid)
         end = datetime.datetime.utcnow()
         msg = "\nExport done {} at {}, total object {} total time {}".format(
             pid,
