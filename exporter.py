@@ -33,7 +33,8 @@ etree.register_namespace("fedora-model", str(FEDORA_MODEL))
 etree.register_namespace("islandora", str(ISLANDORA))
 
 logging.getLogger("requests").setLevel(logging.WARNING)
-logging.getLogger("Elasticsearch").setLevel(logging.ERROR)
+logging.basicConfig(filename="production.log",
+                    level=logging.INFO)
 
 def format_filename(s):
     valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
@@ -45,8 +46,12 @@ def format_filename(s):
 def get_filename(pid):
     object_url = f"{config.REST_URL}{pid}?format=xml"
     object_result = requests.get(object_url)
-    object_xml = etree.XML(object_result.text.encode())
-    label = object_xml.find("obj:objLabel", namespaces=NS)
+    label = None
+    try:
+        object_xml = etree.XML(object_result.text.encode())
+        label = object_xml.find("obj:objLabel", namespaces=NS)
+    except etree.XMLSyntaxError:
+        click.echo(f"{pid} Object XML Syntax Error")
     if label is not None:
         return format_filename(label.text)
     else:
@@ -203,6 +208,7 @@ class Exporter(object):
         ds_pid_url = f"{self.rest_url}{pid}/datastreams?format=xml"
         result = requests.get(ds_pid_url)
         if result.status_code > 399:
+            click.echo(f"{ds_pid_url} returns {result.status_code}")
             raise ExporterError(
                 f"Failed to retrieve datastreams for {pid}",
                 f"Code {result.status_code} for url {ds_pid_url} \nError {result.text}")
@@ -236,9 +242,10 @@ class Exporter(object):
             file_response = requests.get(ds_url, stream=True)
             if file_response.status_code > 300:
                 continue
-            for chunk in file_response.iter_content(chunk_size=1024):
-                if chunk:
-                     file_path.write_bytes(chunk)
+            with open(file_path.absolute(), 'wb+') as ds:
+                for chunk in file_response.iter_content(chunk_size=10000):
+                     ds.write(chunk)
+            logging.info(f"{datetime.datetime.utcnow()} {ds_url} exported size {file_response.headers.get('Content-Length')} {file_path.absolute()}")
 
  
     def __export_compound__(self, pid, parent_path):
@@ -286,6 +293,8 @@ WHERE {{
             fieldnames = list(set(self.dublin_core[collection_pid]['fields']))
         else:
             return
+        if len(fieldnames) < 2:
+            return
         with path.open("w", encoding='utf-8', newline='') as fo:
             csv_writer = csv.DictWriter(fo, fieldnames=fieldnames)
             csv_writer.writeheader()
@@ -295,10 +304,13 @@ WHERE {{
 
 
     def __generate_metadata__(self, path, collection_pid):
-        if len(self.mods) > 0:
+        if len(self.mods) > 1:
             self.__generate_csv__(path/"mods.csv", collection_pid)
-        if len(self.dublin_core) > 0:
+            logging.info(f"{datetime.datetime.utcnow()} MODS CSV {path}/mods.csv generated for {collection_pid}")
+        if len(self.dublin_core) > 1:
             self.__generate_csv__(path/"dublin_core.csv", collection_pid)
+            logging.info(f"{datetime.datetime.utcnow()} Dublin Core CSV {path}/dublin_core.csv generated for {collection_pid}")
+ 
 
     def __get_child_metadata__(self, child_pid, collection_pid):
         dc_url = f"{self.rest_url}{child_pid}/datastreams/DC/content"
@@ -365,6 +377,7 @@ WHERE {{
                 self.__export_compound__(pid, parent_path)
                 return
         self.__export_datastreams__(pid, parent_path)
+        logging.info(f"{datetime.datetime.utcnow()} {pid} exported")
 
     def export_collection(self, pid, parent_path):
         """Method takes a parent collection PID, retrieves all children, and
@@ -439,9 +452,8 @@ WHERE {{
             end.isoformat(),
             len(children),
             (end-started).seconds / 60.0)
-        self.logger.info(msg)
+        logging.info(msg)
         click.echo(msg)
-
 
 class ExporterError(Exception):
     """Base for any errors indexing Fedora 3.x objects into Elasticsearch"""
@@ -453,7 +465,7 @@ class ExporterError(Exception):
 	       title -- Title for Error
 		   description -- More detailed information about the exception
         """
-        super(IndexerError, self).__init__()
+        super(ExporterError, self).__init__()
         self.title = title
         self.description = description
 
