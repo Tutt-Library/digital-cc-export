@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mods:mods xmlns:mods="http://www.loc.gov/mods/v3">
+	<mods:genre>periodical</mods:genre>
+	<mods:typeOfResource>text</mods:typeOfResource>
+	<mods:name type="personal">
+		<mods:namePart>Guynn, Kate</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">creator</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Stearns, Beckley</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Murphy, Mary</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Jacobs, Gabe</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Fine, Gabriel</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>MacLeod, Anne</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Nee, Kelan</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Atencio, Amelia</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>McGinnis, Kendall</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Bonyhadi, Elsa</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Wilson, Rowan</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Wigdale, Abby</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Blazhevski, Andrej</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Watkins, Nick</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Vu, Quang</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Day, Maya</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Ciffolillo, Leah</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Shore, Remi</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Lowe, Miles Lamar</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:name type="personal">
+		<mods:namePart>Gonzalez, Emma</mods:namePart>
+		<mods:role>
+			<mods:roleTerm authority="marcrelator" type="text">contributor</mods:roleTerm>
+		</mods:role>
+	</mods:name>
+	<mods:language>English</mods:language>
+	<mods:originInfo>
+		<mods:dateCreated keyDate="yes">2018-04</mods:dateCreated>
+		<mods:publisher>Colorado College</mods:publisher>
+		<mods:place>
+			<mods:placeTerm>Colorado Springs, Colorado</mods:placeTerm>
+		</mods:place>
+		<mods:frequency>Quarterly</mods:frequency>
+	</mods:originInfo>
+	<mods:physicalDescription>
+		<mods:digitalOrigin>born digital</mods:digitalOrigin>
+	</mods:physicalDescription>
+	<mods:subject>
+		<mods:geographic>Colorado Springs (Colo.)</mods:geographic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>College publications</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>Student publications</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>Student periodicals</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>Sculpture</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>Poetry</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>Painting</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>Creative nonfiction</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>Prints</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>Short stories</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:topic>Drawing</mods:topic>
+	</mods:subject>
+	<mods:subject>
+		<mods:name type="corporate">
+			<mods:namePart/>
+		</mods:name>
+	</mods:subject>
+	<mods:subject>
+		<mods:name type="personal">
+			<mods:namePart/>
+		</mods:name>
+	</mods:subject>
+	<mods:titleInfo>
+		<mods:title>Leviathan [2017-2018 v. 45 n. 4 Spring]</mods:title>
+	</mods:titleInfo>
+	<mods:identifer type="local">coccc:30286</mods:identifer>
+</mods:mods>
