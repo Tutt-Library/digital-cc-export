@@ -145,11 +145,14 @@ class Exporter(object):
                 continue
             column = f"{child.tag}".replace(r"{http://purl.org/dc/elements/1.1/}", "dc:")
             if column in dc_dict:
-                try:
-                    counter = int(column[-1])
-                    column = f"{column[:-1]}{counter + 1}"
-                except ValueError:
-                    column = f"{column}1"
+                # Arbitary limit of 30 elements
+                for i in range(30): 
+                    next_column = f"{column}{i}"
+                    if next_column in mods_dict:
+                        continue
+                    else:
+                        column = next_column
+                        break 
             dc_dict[column] = child.text
             self.dublin_core[collection_pid]['fields'].append(column)
         self.dublin_core[collection_pid]['rows'].append(dc_dict)
@@ -180,12 +183,14 @@ class Exporter(object):
             if 'type' in child.attrib:
                 column += f"[type={child.attrib.get('type')}]"
             if column in mods_dict:
-                # Extracts last character, if int, increment column by 1
-                try:
-                    current = int(column[-1])
-                    column = f"{column[:-1]}{current + 1}"
-                except ValueError:
-                    column = f"{column}1"
+                # Arbitary limit of 30 elements
+                for i in range(30): 
+                    next_column = f"{column}{i}"
+                    if next_column in mods_dict:
+                        continue
+                    else:
+                        column = next_column
+                        break 
             mods_dict[column] = child.text
             self.mods[collection_pid]['fields'].append(column)
         mods_dict['pid'] = pid
